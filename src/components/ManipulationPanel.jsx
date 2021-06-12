@@ -13,7 +13,6 @@ const ManipulationPanel = ({ onChange }) => {
   const onRight = () => onChange(Direction.right);
   const onLeft = () => onChange(Direction.left);
   const onDown = () => onChange(Direction.down);
-
   return (
     <div className="manipulation-panel">
       <button className="manipulation-btn btn btn-left" onClick={onLeft}>

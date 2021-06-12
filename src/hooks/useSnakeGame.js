@@ -1,89 +1,29 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useReducer } from 'react';
 import {
-  defaultInterval,
   defaultDifficulty,
-  initialPosition,
-  initialValues,
   Delta,
   Difficulty,
   Direction,
   DirectionKeyCodeMap,
   GameStatus,
   OppositeDirection,
+  initialPosition,
+  initialValues,
 } from '../constants';
 import {
   initFields,
   isCollision,
-  isEatingMyself,
   getFoodPosition,
+  isEatingMyself,
 } from '../utils';
 
-let timer = null;
-
-const unsubscribe = () => {
-  if (!timer) {
-    return;
-  }
-  clearInterval(timer);
-};
-
-// const reducer = (state, action) => {
-//   const { position, fields, direction, status } = state;
-//   switch (action.type) {
-//     case 'tick':
-//       if (status !== GameStatus.playing) {
-//         return state;
-//       }
-
-//       const { x, y } = position;
-//       const delta = Delta[direction];
-//       const newPosition = {
-//         x: x + delta.x,
-//         y: y + delta.y,
-//       };
-//       if (isCollision(fields.length, newPosition)) {
-//         unsubscribe();
-//         return { ...state, status: GameStatus.gameover };
-//       }
-//       const newFields = [...fields];
-//       newFields[y][x] = '';
-//       newFields[newPosition.y][newPosition.x] = 'snake';
-//       return { ...state, position: newPosition, fields: newFields };
-
-//     case 'start':
-//       return {
-//         ...state,
-//         status: GameStatus.playing,
-//       };
-
-//     case 'restart':
-//       return {
-//         position: initialPosition,
-//         fields: initFields(35, initialPosition),
-//         status: GameStatus.init,
-//         direction: Direction.up,
-//       };
-
-//     case 'changeDirection':
-//       if (status !== GameStatus.playing) {
-//         return status;
-//       }
-//       if (OppositeDirection[direction] === action.direction) {
-//         return status;
-//       }
-//       return {
-//         ...state,
-//         direction: action.direction,
-//       };
-//     default:
-//       throw new Error();
-//   }
-// };
-
 const reducer = (state, action) => {
-  const { fields, body, direction } = state;
+  const { body, fields, status, direction } = state;
   switch (action.type) {
     case 'move':
+      if (status !== GameStatus.playing) {
+        return state;
+      }
       const { x, y } = body[0];
       const delta = Delta[direction];
       const newPosition = {
@@ -94,23 +34,57 @@ const reducer = (state, action) => {
         isCollision(fields.length, newPosition) ||
         isEatingMyself(fields, newPosition)
       ) {
-        unsubscribe();
         return { ...state, status: GameStatus.gameover };
       }
       const newBody = [...body];
       const newFields = [...fields];
-      if (fields[newPosition.y][newPosition.x] !== 'food') {
-        // しっぽを消す
+      if (newFields[newPosition.y][newPosition.x] !== 'food') {
         const removingTrack = newBody.pop();
         newFields[removingTrack.y][removingTrack.x] = '';
       } else {
-        // 新しいえさをフィールドに追加する
         const food = getFoodPosition(fields.length, [...newBody, newPosition]);
         newFields[food.y][food.x] = 'food';
       }
       newFields[newPosition.y][newPosition.x] = 'snake';
       newBody.unshift(newPosition);
-      return { ...state, body: newBody, fields: newFields };
+      return {
+        ...state,
+        body: newBody,
+        fields: newFields,
+      };
+
+    case 'changeDirection':
+      if (status !== GameStatus.playing) {
+        return state;
+      }
+      if (OppositeDirection[direction] === action.direction) {
+        return state;
+      }
+      return { ...state, direction: action.direction };
+
+    case 'start':
+      return { ...state, status: GameStatus.playing };
+
+    case 'stop':
+      return { ...state, status: GameStatus.suspended };
+
+    case 'reset':
+      return {
+        ...state,
+        body: [initialPosition],
+        fields: initFields(35, initialPosition),
+        status: GameStatus.init,
+        direction: Direction.up,
+      };
+
+    case 'changeDifficulty':
+      if (status !== GameStatus.init) {
+        return state;
+      }
+      if (action.difficulty < 1 || action.difficulty > Difficulty.length) {
+        return state;
+      }
+      return { ...state, difficulty: action.difficulty };
 
     default:
       throw new Error();
@@ -118,85 +92,21 @@ const reducer = (state, action) => {
 };
 
 const useSnakeGame = () => {
-  const [fields, setFields] = useState(initialValues);
-  const [body, setBody] = useState([initialPosition]);
-  // const [state, dispatch] = useReducer(reducer, {
-  //   position: initialPosition,
-  //   fields: initialValues,
-  //   status: GameStatus.init,
-  //   direction: Direction.up,
-  // });
-  const [status, setStatus] = useState(GameStatus.init);
-  const [direction, setDirection] = useState(Direction.up);
-  const [difficulty, setDifficulty] = useState(defaultDifficulty);
-  const [tick, setTick] = useState(0);
+  const [state, dispatch] = useReducer(reducer, {
+    body: [initialPosition],
+    fields: initialValues,
+    status: GameStatus.init,
+    direction: Direction.up,
+    difficulty: defaultDifficulty,
+  });
 
   useEffect(() => {
-    // ゲームの中の時間を管理する
-    const interval = Difficulty[difficulty - 1];
-    timer = setInterval(() => {
-      setTick((tick) => tick + 1);
-      // dispatch({ type: 'tick' });
+    const interval = Difficulty[state.difficulty - 1];
+    const timer = setInterval(() => {
+      dispatch({ type: 'move' });
     }, interval);
-    return unsubscribe;
-  }, [difficulty]);
-
-  useEffect(() => {
-    if (status !== GameStatus.playing) {
-      return;
-    }
-    const canContinue = handleMoving();
-    if (!canContinue) {
-      unsubscribe();
-      setStatus(GameStatus.gameover);
-    }
-  }, [tick]);
-
-  const start = () => setStatus(GameStatus.playing);
-  // const onStart = () => dispatch({ type: 'start' });
-
-  const stop = () => setStatus(GameStatus.suspended);
-
-  const reload = () => {
-    const interval = Difficulty[difficulty - 1];
-    timer = setInterval(() => {
-      setTick((tick) => tick + 1);
-      // dispatch({ type: 'tick' });
-      // }, defaultInterval);
-    }, interval);
-    setStatus(GameStatus.init);
-    setBody([initialPosition]);
-    setDirection(Direction.up);
-    setFields(initFields(35, initialPosition));
-    // dispatch({ type: 'restart' });
-  };
-
-  const updateDirection = useCallback(
-    (newDirection) => {
-      if (status !== GameStatus.playing) {
-        return;
-      }
-      if (OppositeDirection[direction] === newDirection) {
-        return;
-      }
-      setDirection(newDirection);
-      // dispatch({ type: 'changeDirection', direction: newDirection });
-    },
-    [direction, status]
-  );
-
-  const updateDifficulty = useCallback(
-    (difficulty) => {
-      if (status !== GameStatus.init) {
-        return;
-      }
-      if (difficulty < 1 || difficulty > Difficulty.length) {
-        return;
-      }
-      setDifficulty(difficulty);
-    },
-    [status, difficulty]
-  );
+    return () => clearInterval(timer);
+  }, [state.difficulty]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -204,57 +114,30 @@ const useSnakeGame = () => {
       if (!newDirection) {
         return;
       }
-      // dispatch({ type: 'changeDirection', direction: newDirection });
-      updateDirection(newDirection);
+      dispatch({ type: 'changeDirection', direction: newDirection });
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [updateDirection]);
+  }, []);
 
-  const handleMoving = () => {
-    const { x, y } = body[0];
-    const delta = Delta[direction];
-    const newPosition = {
-      x: x + delta.x,
-      y: y + delta.y,
-    };
-    if (
-      isCollision(fields.length, newPosition) ||
-      isEatingMyself(fields, newPosition)
-    ) {
-      return false;
-    }
-    const newBody = [...body];
-    const newFields = [...fields];
-    if (fields[newPosition.y][newPosition.x] !== 'food') {
-      const removingTrack = newBody.pop();
-      // fields[removingTrack.y][removingTrack.x] = '';
-      newFields[removingTrack.y][removingTrack.x] = '';
-    } else {
-      const food = getFoodPosition(fields.length, [...newBody, newPosition]);
-      // fields[food.y][food.x] = 'food';
-      newFields[food.y][food.x] = 'food';
-    }
-    //fields[newPosition.y][newPosition.x] = 'snake';
-    newFields[newPosition.y][newPosition.x] = 'snake';
-    newBody.unshift(newPosition);
-    setBody(newBody);
-    // setFields(fields);
-    setFields(newFields);
-    return true;
-  };
+  const onStart = () => dispatch({ type: 'start' });
+  const onStop = () => dispatch({ type: 'stop' });
+  const onRestart = () => dispatch({ type: 'reset' });
+  const onChangeDirection = (newDirection) =>
+    dispatch({ type: 'changeDirection', direction: newDirection });
+  const onChangeDifficulty = (newDifficulty) =>
+    dispatch({ type: 'changeDifficulty', difficulty: newDifficulty });
 
   return {
-    body,
-    difficulty,
-    fields,
-    status,
-    start,
-    start,
-    stop,
-    reload,
-    updateDirection,
-    updateDifficulty,
+    body: state.body,
+    difficulty: state.difficulty,
+    fields: state.fields,
+    status: state.status,
+    start: onStart,
+    stop: onStop,
+    reload: onRestart,
+    updateDirection: onChangeDirection,
+    updateDifficulty: onChangeDifficulty,
   };
 };
 
